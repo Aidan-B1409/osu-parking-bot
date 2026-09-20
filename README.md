@@ -1,5 +1,11 @@
 # OSU parking permit monitor
 
+## AI Disclosure
+
+Project was built with extensive use of OpenAI Codex. Code is pending human review.
+
+## Summary
+
 Checks **Monthly Permit - Zone A1 (514)** hourly and sends Discord DMs on availability, followed by daily reminders while fresh checks still confirm availability. One Python process, SQLite, Playwright Chromium, and a temporary noVNC desktop, packaged for TrueNAS Docker Custom Apps.
 
 **Live acceptance is not complete.** The university's authenticated navigation, reliable loading signal, MFA behavior, session lifetime, and TrueNAS sandbox compatibility must be verified with your account. The application fails closed until you configure readiness and install a session that survives a headless browser restart. Local fixtures do not prove university authentication works. See [the runbook](deploy/RUNBOOK.md) for the feasibility gate and 48-hour acceptance checklist.
