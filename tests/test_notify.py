@@ -90,3 +90,35 @@ async def test_rate_limit_blocks_other_events(available, cfg, monkeypatch):
         await deliver_once(discord, available, 110)
         assert len(calls) == 1
         assert available.get('discord_not_before') == 401
+
+
+@pytest.mark.parametrize(('code', 'hint'), [
+    (50007, 'Cannot send messages to this user'),
+    (50001, 'Missing access'),
+    (50013, 'Missing permissions'),
+    (123456, 'Discord code 123456'),
+])
+async def test_rejection_preserves_safe_code_and_operation(available, cfg, code, hint):
+    def respond(request):
+        if request.url.path.endswith('/users/@me/channels'):
+            return httpx.Response(200, json={'id': '5678'})
+        return httpx.Response(403, json={'code': code, 'message': 'SECRET response content'})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        await deliver_once(Discord(cfg, available, client), available, 101)
+    reason = available.get('notification_error')['reason']
+    assert 'send DM' in reason
+    assert f'HTTP 403; Discord code {code}' in reason
+    assert hint in reason
+    assert 'SECRET' not in reason
+    assert 'fake-test-token' not in reason
+
+
+@pytest.mark.parametrize('body', [
+    '<html>SECRET</html>', '[]', '{"code":"SECRET","message":"SECRET"}',
+    '{"code":true}', '{"code":-1}', '{"code":999999999999999999999}',
+])
+async def test_rejection_ignores_untrusted_response_content(available, cfg, body):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda request: httpx.Response(403, text=body))) as client:
+        await deliver_once(Discord(cfg, available, client), available, 101)
+    assert available.get('notification_error')['reason'] == 'Discord rejected create DM (HTTP 403)'

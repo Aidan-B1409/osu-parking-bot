@@ -11,7 +11,7 @@ import uuid
 from . import auth
 from .browser import check
 from .config import Config
-from .notify import Discord
+from .notify import DeliveryError, Discord
 from .service import run
 from .state import State
 from .storage import lock, prepare
@@ -120,7 +120,7 @@ def main():
         return 1
     except Exception as error:
         # Do not expose library exceptions that may embed portal URLs or headers.
-        safe = str(error) if isinstance(error, (ValueError, RuntimeError)) else type(error).__name__
+        safe = str(error) if isinstance(error, (ValueError, RuntimeError, DeliveryError)) else type(error).__name__
         print(f'parking-bot: {safe}', file=sys.stderr)
         return 1
     finally:

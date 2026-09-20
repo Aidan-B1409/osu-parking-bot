@@ -40,3 +40,38 @@ def test_cli_no_session_is_offline(cfg):
         result = subprocess.run(['parking-bot', *args], env=env, capture_output=True, text=True)
         assert result.returncode == expected, result.stderr
     assert json.loads(subprocess.check_output(['parking-bot', 'status', '--json'], env=env))['auth_required']
+
+
+def test_notify_test_reports_safe_discord_error(cfg, monkeypatch, capsys):
+    import httpx
+
+    from parking_bot import cli
+    from parking_bot.notify import Discord
+
+    cfg.token_file.write_text('SECRET-BOT-TOKEN')
+    closed = []
+
+    class RejectedDiscord(Discord):
+        def __init__(self, config, state):
+            client = httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda request: httpx.Response(403, json={'code': 50007, 'message': 'SECRET-RESPONSE'})))
+            super().__init__(config, state, client)
+
+        async def close(self):
+            await super().close()
+            closed.append(True)
+
+    monkeypatch.setattr(cli.Config, 'from_env', lambda: cfg)
+    monkeypatch.setattr(cli, 'Discord', RejectedDiscord)
+    monkeypatch.setattr('sys.argv', ['parking-bot', 'notify-test'])
+    previous_umask = os.umask(0o077)
+    try:
+        assert cli.main() == 1
+    finally:
+        os.umask(previous_umask)
+    output = capsys.readouterr()
+    assert 'Discord rejected create DM (HTTP 403; Discord code 50007)' in output.err
+    assert 'Cannot send messages to this user' in output.err
+    assert 'SECRET' not in output.err
+    assert 'Test DM sent' not in output.out
+    assert closed == [True]

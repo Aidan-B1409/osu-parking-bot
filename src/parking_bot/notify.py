@@ -13,6 +13,30 @@ class DeliveryError(Exception):
         self.delay = delay
 
 
+def rejection_reason(response, path):
+    """Report only known local text and a numeric code, never response bodies."""
+    operation = 'create DM' if path == '/users/@me/channels' else 'send DM'
+    details = f'HTTP {response.status_code}'
+    code = None
+    try:
+        body = response.json()
+        candidate = body.get('code') if isinstance(body, dict) else None
+        if type(candidate) is int and 0 <= candidate <= 2**31 - 1:
+            code = candidate
+            details += f'; Discord code {code}'
+    except ValueError:
+        pass
+    hints = {
+        50001: 'Missing access. Verify the bot identity, recipient ID, and shared server.',
+        50007: 'Cannot send messages to this user. Check the recipient ID, shared server, DM privacy, and blocked users.',
+        50013: 'Missing permissions for this resource. Verify the bot identity and DM channel access.',
+    }
+    hint = hints.get(code, '')
+    if not hint and response.status_code == 401:
+        hint = 'Check that the token file contains the current bot token.'
+    return f'Discord rejected {operation} ({details})' + (f': {hint}' if hint else '')
+
+
 class Discord:
     def __init__(self, cfg, state, client=None):
         self.cfg = cfg
@@ -49,7 +73,7 @@ class Discord:
         if response.status_code >= 500:
             raise DeliveryError('Discord service error')
         if response.status_code >= 400:
-            raise DeliveryError(f'Discord rejected request (HTTP {response.status_code})', 86400)
+            raise DeliveryError(rejection_reason(response, path), 86400)
         try:
             result = response.json()
             if not isinstance(result, dict) or not str(result.get('id', '')).isdecimal():

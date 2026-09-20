@@ -13,6 +13,8 @@ install -d -m 700 -o 1000 -g 1000 /mnt/POOL/parking-bot/secrets
 
 Create `secrets/discord_token` using a secure editor, with mode 0400 and owner 1000. Do not put its value in shell command arguments/history. Session files can convey broader SSO access; protect dataset snapshots and backups as credentials. A read-only mount does not encrypt its host source file.
 
+Run `parking-bot notify-test` in the application shell to test Discord independently of university authentication or readiness configuration. Delivery errors report the failing operation (create DM or send DM), HTTP status, and Discord's numeric error code when present. The application prints only locally defined explanations, never raw response bodies or tokens. Code 50007 means Discord cannot send messages to that user; verify your personal recipient ID, shared server membership, DM privacy settings, and blocked users. Codes 50001 and 50013 indicate access or permission failures. See [Discord's error definitions](https://docs.discord.com/developers/topics/opcodes-and-status-codes#json). An older image may print only `DeliveryError`; update the image to get these diagnostics. A successful manual test does not clear the background worker's previous error in `status`.
+
 ## 2. Install the container
 
 Use TrueNAS **Apps → Discover → Install via YAML**, as described in the [Custom Apps documentation](https://apps.truenas.com/managing-apps/installing-custom-apps/). Start from [compose.yaml](compose.yaml). Replace the GHCR owner/version, pool paths, Discord user ID, and readiness placeholder. Use an empty readiness string for the first discovery session. Copy `chromium-seccomp.json` alongside your dataset and update its absolute path in `security_opt`.
