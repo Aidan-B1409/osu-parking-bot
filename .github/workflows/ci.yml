@@ -8,7 +8,7 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,7 +17,25 @@ jobs:
       - run: pip install -e '.[test]'
       - run: playwright install --with-deps chromium
       - run: ruff check .
-      - run: pytest -q
+      - name: Allow Chromium sandbox namespaces on the CI runner
+        # CI-only: relax Ubuntu's AppArmor user-namespace restriction on this
+        # disposable hosted VM. Chromium's own sandbox remains enabled.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Verify sandboxed Chromium launch
+        run: |
+          python - <<'PY'
+          from playwright.sync_api import sync_playwright
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(chromium_sandbox=True)
+              try:
+                  page = browser.new_page()
+                  page.set_content("<title>Sandbox launch OK</title>")
+                  assert page.title() == "Sandbox launch OK"
+              finally:
+                  browser.close()
+          PY
+      - run: pytest -q --maxfail=1
       - run: docker build -t osu-parking-bot:test .
       - name: Offline container authentication smoke test
         run: >-
