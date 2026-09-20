@@ -23,16 +23,21 @@ class Config:
     auth_selector: str = ''
     auth_bind: str = '127.0.0.1'
     auth_port: int = 6080
+    auth_timeout: int = 1800
     session_storage: bool = False
     check_timeout: float = 120
     sandbox: bool = True
     executable: str | None = None
     data_request_patterns: tuple[str, ...] = field(default_factory=tuple)
 
+    def __post_init__(self):
+        if self.auth_timeout <= 0:
+            raise ValueError('Authentication timeout must be a positive number of seconds')
+
     @classmethod
     def from_env(cls):
         values = {}
-        integers = {'interval', 'reminder', 'auth_port'}
+        integers = {'interval', 'reminder', 'auth_port', 'auth_timeout'}
         sequences = {'navigation', 'auth_hosts', 'data_request_patterns'}
         for name in cls.__dataclass_fields__:
             raw = os.getenv('PARKING_' + name.upper())

@@ -99,3 +99,78 @@ async def test_auth_error_propagates(cfg, state, monkeypatch):
     monkeypatch.setattr(auth, '_start', inner)
     with pytest.raises(TimeoutError):
         await auth.start(cfg, state, asyncio.Event())
+
+
+async def test_initial_navigation_timeout_keeps_browser_open(cfg, capsys):
+    from unittest.mock import AsyncMock, Mock
+
+    from playwright.async_api import TimeoutError as PlaywrightTimeout
+
+    page = Mock()
+    page.goto = AsyncMock(side_effect=PlaywrightTimeout('SECRET URL'))
+    page.is_closed.return_value = False
+    await auth.open_login_page(page, cfg)
+    assert 'login browser remains open' in capsys.readouterr().out
+    page.close.assert_not_called()
+
+
+async def test_closed_browser_is_not_treated_as_slow_navigation(cfg):
+    from unittest.mock import AsyncMock, Mock
+
+    from playwright.async_api import Error
+
+    page = Mock()
+    page.goto = AsyncMock(side_effect=Error('SECRET URL'))
+    page.is_closed.return_value = True
+    with pytest.raises(RuntimeError, match='browser closed'):
+        await auth.open_login_page(page, cfg)
+
+
+async def test_auth_cli_timeout_override(cfg, state, monkeypatch):
+    from parking_bot import cli
+
+    observed = []
+    async def start(config, db, stop):
+        observed.append(config.auth_timeout)
+    monkeypatch.setattr(auth, 'start', start)
+    args = cli.parser().parse_args(['auth', 'start', '--timeout', '3600'])
+    await cli.dispatch(args, cfg, state)
+    assert observed == [3600]
+
+
+def test_auth_timeout_environment_and_bounds(monkeypatch):
+    from parking_bot.config import Config
+
+    monkeypatch.setenv('PARKING_AUTH_TIMEOUT', '3600')
+    assert Config.from_env().auth_timeout == 3600
+    for value in ['0', '-1']:
+        monkeypatch.setenv('PARKING_AUTH_TIMEOUT', value)
+        with pytest.raises(ValueError, match='positive'):
+            Config.from_env()
+
+
+async def test_session_deadline_cleans_up_and_preserves_previous_state(cfg, state, monkeypatch):
+    from dataclasses import replace
+    from unittest.mock import Mock
+
+    cfg = replace(cfg, auth_timeout=1)
+    atomic_json(cfg.session_path, {'previous': True})
+    commands = []
+    terminated = []
+    process = Mock()
+    def spawn(command, **kwargs):
+        commands.append(command)
+        info = json.loads((cfg.data_dir / 'auth-status.json').read_text())
+        assert info['deadline'] - info['started'] == 1
+        return process
+    monkeypatch.setattr(auth.sys.stdout, 'isatty', lambda: True)
+    monkeypatch.setattr(auth.subprocess, 'Popen', spawn)
+    monkeypatch.setattr(auth, 'terminate', terminated.append)
+    with pytest.raises(RuntimeError, match='timed out after 1 seconds'):
+        await auth._start(cfg, state, asyncio.Event())
+    assert commands[0][:3] == ['timeout', '--kill-after=5', '1']
+    assert process in terminated
+    assert json.loads(cfg.session_path.read_text()) == {'previous': True}
+    assert not (cfg.data_dir / 'auth-status.json').exists()
+    with lock(cfg.data_dir / 'browser.lock'):
+        pass

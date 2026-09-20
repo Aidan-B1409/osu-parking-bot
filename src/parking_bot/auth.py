@@ -50,6 +50,16 @@ async def install_candidate(cfg, state, candidate):
     state.installed_auth(time.time())
 
 
+async def open_login_page(page, cfg):
+    try:
+        await page.goto(cfg.portal_url, wait_until='domcontentloaded', timeout=30000)
+    except Error:
+        if page.is_closed():
+            raise RuntimeError('Authentication browser closed while opening the portal') from None
+        print('Initial portal navigation did not complete. The login browser remains open; '
+              'continue signing in or retry navigation manually.', flush=True)
+
+
 async def start(cfg, state, cancelled):
     task = asyncio.create_task(_start(cfg, state, cancelled))
     try:
@@ -76,7 +86,8 @@ async def _start(cfg, state, cancelled):
         marker = cfg.data_dir / 'auth-stop'
         marker.unlink(missing_ok=True)
         info = cfg.data_dir / 'auth-status.json'
-        atomic_json(info, {'started': time.time(), 'deadline': time.time() + 900})
+        started = time.time()
+        atomic_json(info, {'started': started, 'deadline': started + cfg.auth_timeout})
         processes = []
         try:
             with tempfile.TemporaryDirectory(prefix='parking-auth-') as temporary:
@@ -87,13 +98,13 @@ async def _start(cfg, state, cancelled):
                 env = dict(os.environ, DISPLAY=':99')
 
                 def spawn(args):
-                    process = subprocess.Popen(['timeout', '--kill-after=5', '900', *args], env=env,
+                    process = subprocess.Popen(['timeout', '--kill-after=5', str(cfg.auth_timeout), *args], env=env,
                                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                                start_new_session=True)
                     processes.append(process)
                     return process
 
-                async with asyncio.timeout(900):
+                async with asyncio.timeout(cfg.auth_timeout):
                     spawn(['Xvfb', ':99', '-screen', '0', '1280x900x24', '-nolisten', 'tcp'])
                     await asyncio.sleep(1)
                     spawn(['openbox'])
@@ -106,6 +117,7 @@ async def _start(cfg, state, cancelled):
                         raise RuntimeError('Temporary desktop failed to start; check tool installation and port conflicts')
                     print(f'Open the private forwarded port {cfg.auth_port}/vnc.html. Temporary VNC password: {password}', flush=True)
                     print('Complete login and navigate to the permit list. Validation is automatic. Ctrl-C cancels.', flush=True)
+                    print(f'Authentication session time limit: {cfg.auth_timeout} seconds.', flush=True)
                     if not cfg.ready_selector:
                         print('Discovery mode: inspect readiness/navigation, then cancel and configure them. No session will be installed.', flush=True)
                     async with async_playwright() as playwright:
@@ -117,7 +129,7 @@ async def _start(cfg, state, cancelled):
                             # A deliberate manual reload starts a fresh inspection attempt.
                             page.on('request', lambda request: watch.errors.clear()
                                     if request.is_navigation_request() and request.frame == page.main_frame else None)
-                            await page.goto(cfg.portal_url, wait_until='domcontentloaded')
+                            await open_login_page(page, cfg)
                             while not cancelled.is_set() and not marker.exists():
                                 if any(p.poll() is not None for p in processes):
                                     raise RuntimeError('Temporary desktop stopped unexpectedly')
@@ -145,6 +157,9 @@ async def _start(cfg, state, cancelled):
                     print('Interactive browser closed. Validating saved state in headless Chromium...', flush=True)
                     await install_candidate(cfg, state, candidate)
                     print('Session reuse validated; monitoring can resume.')
+        except TimeoutError:
+            raise RuntimeError(f'Authentication session timed out after {cfg.auth_timeout} seconds; '
+                               'previous session retained. Run auth start --timeout SECONDS for more time.') from None
         finally:
             for process in reversed(processes):
                 terminate(process)

@@ -31,7 +31,7 @@ Python 3.12+ on Linux is required. Tests intercept browser traffic and mock Disc
 | --- | --- |
 | `parking-bot run` | Scheduler, heartbeat, and independent notification retries |
 | `parking-bot check --dry-run` | One live read-only check, no DMs or notification-history changes |
-| `parking-bot auth start` | Foreground temporary remote browser; keep the terminal open |
+| `parking-bot auth start [--timeout SECONDS]` | Foreground temporary remote browser; default 30 minutes; keep the terminal open |
 | `parking-bot auth status` / `stop` | Inspect or cancel renewal from another shell |
 | `parking-bot notify-test` | Explicitly send a setup DM |
 | `parking-bot status --json` | Results, UTC timestamps, schedule, auth condition, delivery failures |
@@ -60,6 +60,7 @@ Environment variables use the `PARKING_` prefix. Configuration errors stop start
 | `DATA_REQUEST_PATTERNS` | `[]` | URL substrings identifying cross-origin permit-data requests; same-origin fetch/XHR and all documents always observed |
 | `SESSION_STORAGE` | `false` | Optional origin-scoped sessionStorage export/restore if experiment proves needed |
 | `AUTH_BIND` / `AUTH_PORT` | `127.0.0.1` / `6080` | Compose sets container bind to `0.0.0.0`, host bind stays loopback |
+| `AUTH_TIMEOUT` | `1800` | Positive session limit in seconds; `auth start --timeout` overrides it, including desktop watchdogs |
 | `CHECK_TIMEOUT` | `120` | Total check deadline in seconds, maximum 120 |
 | `SANDBOX` | `true` | Chromium sandbox; deployment should keep enabled |
 | `EXECUTABLE` | Playwright managed Chromium | Development override only |

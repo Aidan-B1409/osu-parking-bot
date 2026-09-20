@@ -7,6 +7,7 @@ import signal
 import sys
 import time
 import uuid
+from dataclasses import replace
 
 from . import auth
 from .browser import check
@@ -24,7 +25,10 @@ def parser():
     checker = commands.add_parser('check')
     checker.add_argument('--dry-run', action='store_true', required=True)
     authentication = commands.add_parser('auth').add_subparsers(dest='auth_command', required=True)
-    for name in ['start', 'status', 'stop']:
+    authentication.add_parser('start').add_argument(
+        '--timeout', type=int, metavar='SECONDS',
+        help='Session time limit; overrides PARKING_AUTH_TIMEOUT (default: 1800 seconds)')
+    for name in ['status', 'stop']:
         authentication.add_parser(name)
     commands.add_parser('notify-test')
     commands.add_parser('status').add_argument('--json', action='store_true')
@@ -64,6 +68,8 @@ async def dispatch(args, cfg, state):
         return 0 if observation.result in {'AVAILABLE', 'UNAVAILABLE'} else 1
     elif args.command == 'auth':
         if args.auth_command == 'start':
+            if args.timeout is not None:
+                cfg = replace(cfg, auth_timeout=args.timeout)
             task = asyncio.create_task(auth.start(cfg, state, stop))
             stopped = asyncio.create_task(stop.wait())
             try:
