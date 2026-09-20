@@ -1,0 +1,1 @@
+"""OSU parking permit monitor."""

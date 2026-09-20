@@ -1,0 +1,30 @@
+services:
+  parking-bot:
+    image: ghcr.io/REPLACE_OWNER/osu-parking-bot:0.1.0
+    user: "1000:1000"
+    init: true
+    restart: unless-stopped
+    shm_size: 1gb
+    mem_limit: 2g
+    # Start with loopback and use an SSH tunnel over the VPN. For direct VPN
+    # access replace 127.0.0.1 with the NAS VPN IP and restrict its firewall.
+    ports:
+      - "127.0.0.1:6080:6080"
+    volumes:
+      - /mnt/POOL/parking-bot/data:/data
+      - /mnt/POOL/parking-bot/secrets/discord_token:/run/secrets/discord_token:ro
+      # This seccomp file is installed on the NAS separately, see runbook.
+    security_opt:
+      - seccomp=/mnt/POOL/parking-bot/chromium-seccomp.json
+    environment:
+      PARKING_RECIPIENT: "REPLACE_DISCORD_USER_ID"
+      PARKING_AUTH_BIND: "0.0.0.0"
+      PARKING_READY_SELECTOR: "REPLACE_VERIFIED_READINESS_SELECTOR"
+      PARKING_NAVIGATION: '[]'
+      PARKING_DATA_REQUEST_PATTERNS: '[]'
+      PARKING_SANDBOX: "true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+.venv
+.env
+data
+secrets
+**/*session*.json
+**/*.sqlite*
+**/*.log
+**/__pycache__
+.pytest_cache
+.ruff_cache
+build
+dist
+*.egg-info
