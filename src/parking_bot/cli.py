@@ -81,10 +81,11 @@ async def dispatch(args, cfg, state):
     elif args.command == 'notify-test':
         discord = Discord(cfg, state)
         try:
-            await discord.send('OSU parking monitor setup test. Discord DMs are working.', str(uuid.uuid4().int)[:24])
+            await discord.send(f'OSU parking monitor setup test. Delivery to Discord channel {cfg.channel_id} '
+                               'is working.', str(uuid.uuid4().int)[:24])
         finally:
             await discord.close()
-        print('Test DM sent.')
+        print(f'Test message sent to Discord channel {cfg.channel_id}.')
     elif args.command == 'status':
         print(json.dumps(state.status(), indent=2))
     elif args.command == 'health':

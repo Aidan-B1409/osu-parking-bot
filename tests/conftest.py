@@ -9,7 +9,7 @@ from parking_bot.storage import prepare
 @pytest.fixture
 def cfg(tmp_path):
     prepare(tmp_path)
-    return Config(data_dir=tmp_path, ready_selector='#ready', recipient='1234', token_file=tmp_path / 'token')
+    return Config(data_dir=tmp_path, ready_selector='#ready', channel_id='1234', token_file=tmp_path / 'token')
 
 
 @pytest.fixture

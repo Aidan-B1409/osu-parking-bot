@@ -17,7 +17,7 @@ services:
     security_opt:
       - seccomp=/mnt/POOL/parking-bot/chromium-seccomp.json
     environment:
-      PARKING_RECIPIENT: "REPLACE_DISCORD_USER_ID"
+      PARKING_CHANNEL_ID: "REPLACE_DISCORD_CHANNEL_ID"
       PARKING_AUTH_BIND: "0.0.0.0"
       PARKING_READY_SELECTOR: "REPLACE_VERIFIED_READINESS_SELECTOR"
       PARKING_NAVIGATION: '[]'

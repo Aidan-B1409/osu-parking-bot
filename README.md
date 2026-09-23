@@ -6,7 +6,7 @@ Project was built with extensive use of OpenAI Codex. Code is pending human revi
 
 ## Summary
 
-Checks **Monthly Permit - Zone A1 (514)** hourly and sends Discord DMs on availability, followed by daily reminders while fresh checks still confirm availability. One Python process, SQLite, Playwright Chromium, and a temporary noVNC desktop, packaged for TrueNAS Docker Custom Apps.
+Checks **Monthly Permit - Zone A1 (514)** hourly and posts to Discord's `#parking-alerts` channel on availability, followed by daily reminders while fresh checks still confirm availability. Availability alerts and reminders ping `@everyone`; authentication and monitoring-error notices do not. One Python process, SQLite, Playwright Chromium, and a temporary noVNC desktop, packaged for TrueNAS Docker Custom Apps.
 
 **Live acceptance is not complete.** The university's authenticated navigation, reliable loading signal, MFA behavior, session lifetime, and TrueNAS sandbox compatibility must be verified with your account. The application fails closed until you configure readiness and install a session that survives a headless browser restart. Local fixtures do not prove university authentication works. See [the runbook](deploy/RUNBOOK.md) for the feasibility gate and 48-hour acceptance checklist.
 
@@ -30,10 +30,10 @@ Python 3.12+ on Linux is required. Tests intercept browser traffic and mock Disc
 | Command | Purpose |
 | --- | --- |
 | `parking-bot run` | Scheduler, heartbeat, and independent notification retries |
-| `parking-bot check --dry-run` | One live read-only check, no DMs or notification-history changes |
+| `parking-bot check --dry-run` | One live read-only check, no notifications or notification-history changes |
 | `parking-bot auth start` | Foreground temporary remote browser; keep the terminal open |
 | `parking-bot auth status` / `stop` | Inspect or cancel renewal from another shell |
-| `parking-bot notify-test` | Explicitly send a setup DM |
+| `parking-bot notify-test` | Explicitly send a setup channel message without mentions |
 | `parking-bot status --json` | Results, UTC timestamps, schedule, auth condition, delivery failures |
 | `parking-bot health` | Local scheduler heartbeat, lock, and database access; no network requests |
 
@@ -41,7 +41,7 @@ Dry runs honor the persisted polling schedule and reserve the next eligible chec
 
 ## Configuration
 
-Environment variables use the `PARKING_` prefix. Configuration errors stop startup.
+Environment variables use the `PARKING_` prefix. Configuration errors stop startup. `PARKING_CHANNEL_ID` is required for `run` and `notify-test`; status, health, checks, and authentication setup remain usable without it. The removed `PARKING_RECIPIENT` setting is ignored, even when both variables are present, and is never a fallback.
 
 | Variable suffix | Default | Notes |
 | --- | --- | --- |
@@ -50,7 +50,7 @@ Environment variables use the `PARKING_` prefix. Configuration errors stop start
 | `INTERVAL` | `3600` | Minimum 3600 seconds, plus 0–120 seconds jitter |
 | `REMINDER` | `86400` | Minimum 24 hours from successful availability delivery |
 | `DATA_DIR` | `/data` | Dedicated owner-only persistent directory |
-| `RECIPIENT` | Empty | Numeric Discord user ID |
+| `CHANNEL_ID` | Empty | Positive Discord server text channel ID, ASCII digits only |
 | `TOKEN_FILE` | `/run/secrets/discord_token` | Read-only secret mount; token reread on sends |
 | `TIMEZONE` | `America/Los_Angeles` | Message display timezone; database stores UTC epoch seconds |
 | `READY_SELECTOR` | Empty | **Required for checks:** verified visible completion signal |
@@ -66,15 +66,19 @@ Environment variables use the `PARKING_` prefix. Configuration errors stop start
 
 Navigation selectors must only advance to permit selection. Never configure purchase, cart, or checkout actions. Do not use `body` or an early-loading container as readiness merely to pass validation. See the runbook for calibration.
 
+Create or select a normal server text channel named `#parking-alerts`, enable Discord Developer Mode, and copy its channel ID into `PARKING_CHANNEL_ID`. Grant the bot effective **View Channel**, **Send Messages**, and **Mention @everyone, @here, and All Roles** permissions there, including channel overrides. Intended recipients must be able to view it. Administrator permission, member enumeration, and privileged Gateway intents are unnecessary for this REST-only workflow. The bot posts directly by ID; it does not look up names or create channels. See [Discord permissions](https://docs.discord.com/developers/topics/permissions) and the [setup and migration runbook](deploy/RUNBOOK.md).
+
 ## Behavior and delivery guarantees
 
 The checker requires one visible matching button, the exact normalized label and value, and verified page readiness. Any `disabled` attribute means unavailable, even `disabled="false"`. Inherited disabling, aria-disabled, hidden/duplicate/renamed/missing controls mean unknown. Recognized sign-in screens mean authentication required. Generic 403, server errors, timeouts, or missing controls never imply unavailable or expired authentication.
 
 Unknown results preserve the availability episode. Only confirmed unavailability closes it. The initial available observation and each reopening create an alert. Repeated availability sends a reminder no sooner than 24 hours after the last successful availability delivery. A reopening can send sooner because it is a new episode. Reminders always require a fresh check.
 
-Pending messages persist before REST calls, use a stable nonce, and are marked sent only after success. Unsent availability messages expire after one hour unless reconfirmed and are cancelled on confirmed closure. Delivery retries run independently every five seconds when eligible, with exponential delay; rate limits and longer server delays take precedence. Invalid tokens or disabled DMs retry daily and appear in status. Operational alerts are immediate for layout/authentication failures and after three consecutive transient check failures; repeated alerts are limited to daily. Resolved pending operational alerts are cancelled.
+Pending messages persist before REST calls, use a stable nonce, and are marked sent only after success. Unsent availability messages expire after one hour unless reconfirmed and are cancelled on confirmed closure. Delivery retries run independently every five seconds when eligible, with exponential delay; rate limits and longer server delays take precedence. Invalid tokens or channel access/permission errors retry daily and appear in status. Operational alerts are immediate for layout/authentication failures and after three consecutive transient check failures; repeated alerts are limited to daily. Resolved pending operational alerts are cancelled.
 
-Discord nonce deduplication covers only a limited window. A crash after Discord accepts a message but before SQLite commits can cause a duplicate. This is not exactly-once delivery. Cached DM channels are keyed by recipient. Token rotation within the same bot is supported; changing bot identity requires clearing the `dm_channel` metadata while the app is stopped.
+Only initial availability, reopening, and daily availability reminders include an active `@everyone` mention. Authentication notices/reminders, monitoring errors, and `notify-test` have mentions disabled. User and role mentions are always disabled; existing `@everyone` and `@here` text in bodies is neutralized before adding the intentional prefix. Ordinary hourly checks and confirmed closure send nothing. A setup test verifies channel posting, not mention permission; check the next naturally occurring availability alert separately. Individual Discord settings can suppress push notifications even when a mention succeeds. See [allowed mentions](https://docs.discord.com/developers/resources/message#allowed-mentions-object).
+
+Discord nonce deduplication covers only a limited window. A crash after Discord accepts a message but before SQLite commits can cause a duplicate. This is not exactly-once delivery. The outbound nonce is the first 24 hex characters of SHA-256 over `channel_id:event_nonce`, stable across retries/restarts to the same channel and distinct from prior DM attempts. SQLite event IDs and bodies stay unchanged. Migration keeps schema version 1, history, reminder timing, pending events, and retry/rate-limit deadlines. Eligible pending events go to the configured channel; sent events are never replayed. Historical `dm_channel` metadata is ignored and needs no cleanup, including after bot identity changes.
 
 Polling failures back off to 2, 4, and 8 hours, with a longer Retry-After honored. The next check is reserved before browsing and persisted, so downtime does not cause catch-up bursts. Hourly polling may miss short openings. An enabled button offers a permit to this account at that moment; it neither reserves inventory nor guarantees checkout. Purchasing is outside scope.
 

@@ -2,7 +2,7 @@
 
 ## 1. Prepare Discord and storage
 
-Create a bot at the [Discord Developer Portal](https://discord.com/developers/applications). Install it in a private server you belong to with the bot scope; no administrator permission or privileged intents are needed. Enable DMs from that server. Enable Developer Mode in Discord and copy your numeric user ID. Store the bot token in a dedicated file, not an environment variable or Compose YAML.
+Create a bot at the [Discord Developer Portal](https://discord.com/developers/applications). Install it in your server with the bot scope. Create or select a normal server text channel named `#parking-alerts`. Grant the bot effective **View Channel**, **Send Messages**, and **Mention @everyone, @here, and All Roles** permissions in that channel; channel permission overrides must allow these operations. Ensure intended recipients can view the channel. Enable Developer Mode in Discord and copy the channel's numeric ID into `PARKING_CHANNEL_ID`. Administrator permission, member enumeration, and privileged Gateway intents are unnecessary for this REST-only workflow. The app posts directly by ID without name lookup or channel creation. See [Discord permissions](https://docs.discord.com/developers/topics/permissions). Store the bot token in a dedicated file, not an environment variable or Compose YAML.
 
 Create a dedicated TrueNAS dataset and secret directory. The image runs as `pwuser`, UID/GID 1000; match ownership or set the Compose user to your dataset owner and verify browser launch. Example commands in the NAS shell (replace POOL):
 
@@ -13,11 +13,15 @@ install -d -m 700 -o 1000 -g 1000 /mnt/POOL/parking-bot/secrets
 
 Create `secrets/discord_token` using a secure editor, with mode 0400 and owner 1000. Do not put its value in shell command arguments/history. Session files can convey broader SSO access; protect dataset snapshots and backups as credentials. A read-only mount does not encrypt its host source file.
 
-Run `parking-bot notify-test` in the application shell to test Discord independently of university authentication or readiness configuration. Delivery errors report the failing operation (create DM or send DM), HTTP status, and Discord's numeric error code when present. The application prints only locally defined explanations, never raw response bodies or tokens. Code 50007 means Discord cannot send messages to that user; verify your personal recipient ID, shared server membership, DM privacy settings, and blocked users. Codes 50001 and 50013 indicate access or permission failures. See [Discord's error definitions](https://docs.discord.com/developers/topics/opcodes-and-status-codes#json). An older image may print only `DeliveryError`; update the image to get these diagnostics. A successful manual test does not clear the background worker's previous error in `status`.
+Run `parking-bot notify-test` in the application shell to test Discord independently of university authentication or readiness configuration. Success identifies the configured channel ID and produces one message without an `@everyone` ping. It leaves scheduled notification history and any previous worker error in `status` untouched. A missing or malformed `PARKING_CHANNEL_ID` stops `run` and `notify-test` promptly; status, health, and authentication setup do not require it. IDs must be nonempty positive integers written using ASCII digits only.
+
+Delivery errors report the operation “send channel message,” HTTP status, and Discord's numeric error code when present. The application prints only locally defined explanations, never raw response bodies or tokens. For code 10003, check the channel ID and whether the channel still exists. For 50001, check bot membership and channel visibility. For 50013, check effective channel permissions. For HTTP 401, check the bot token. See [Discord's error definitions](https://docs.discord.com/developers/topics/opcodes-and-status-codes#json).
+
+Only availability alerts (including reopenings) and daily availability reminders ping `@everyone`. Authentication notices/reminders and monitoring errors do not. User and role mentions are disabled, and incidental `@everyone`/`@here` text in message bodies is neutralized. A successful setup test verifies posting, not mention permission. Check the next naturally occurring availability alert for an active `@everyone` mention separately; individual notification settings can suppress push notifications even when the mention succeeds. See [Discord allowed mentions](https://docs.discord.com/developers/resources/message#allowed-mentions-object).
 
 ## 2. Install the container
 
-Use TrueNAS **Apps → Discover → Install via YAML**, as described in the [Custom Apps documentation](https://apps.truenas.com/managing-apps/installing-custom-apps/). Start from [compose.yaml](compose.yaml). Replace the GHCR owner/version, pool paths, Discord user ID, and readiness placeholder. Use an empty readiness string for the first discovery session. Copy `chromium-seccomp.json` alongside your dataset and update its absolute path in `security_opt`.
+Use TrueNAS **Apps → Discover → Install via YAML**, as described in the [Custom Apps documentation](https://apps.truenas.com/managing-apps/installing-custom-apps/). Start from [compose.yaml](compose.yaml). Replace the GHCR owner/version, pool paths, Discord channel ID, and readiness placeholder. Use an empty readiness string for the first discovery session. Copy `chromium-seccomp.json` alongside your dataset and update its absolute path in `security_opt`.
 
 The image and Python dependency both pin Playwright 1.58.0; update both together. The profile permits Chromium user namespaces under a non-root user. Keep Chromium's sandbox enabled. TrueNAS/kernel restrictions may still prevent launch: validate locally and on the NAS before trusting monitoring. Do not solve launch failures with privileged mode or silently disable the sandbox.
 
@@ -44,7 +48,7 @@ The actual authenticated permit page has not been inspected for this implementat
 5. Cancel with Ctrl-C or `parking-bot auth stop`. Set `PARKING_READY_SELECTOR` and, if required, `PARKING_NAVIGATION` to a JSON array of locator strings that navigate only to selection. Keep these settings identical in the scheduler and auth command. Update/restart the app.
 6. Run `auth start` again and sign in. On finding the verified ready permit list, the app exports cookies, local storage, and IndexedDB, closes remote access, and tests the candidate session in fresh headless Chromium through the configured navigation. Only a successful AVAILABLE or UNAVAILABLE result atomically replaces the old session and resumes the scheduler.
 7. If reuse fails, the prior session remains intact. Investigate locally: wrong navigation/readiness, conditional access, short session lifetime, or origin-specific sessionStorage. Enable `PARKING_SESSION_STORAGE=true` only if sessionStorage is needed, then repeat. Do not claim feasibility if MFA is required on every visit or policy blocks the remote browser. Revise the design with the observed restriction.
-8. Run `parking-bot notify-test` once and confirm the DM reaches your phone. `status --json` should then show a successful scheduled check. An explicit dry run may be delayed until the next eligible check; it does not send notifications.
+8. Run `parking-bot notify-test` once and confirm one message appears in `#parking-alerts` without a ping. Inspect `status --json` for a successful scheduled check once it occurs; the setup message does not perform a portal check. An explicit dry run may be delayed until the next eligible check; it does not send notifications.
 
 Default recognized auth hosts are Microsoft login and OSU login. Add actual verified Duo/identity-provider hosts or a portal login selector if needed. A generic 403 intentionally raises an unknown operational alert rather than pausing as authentication loss. Missing or changed page structure requires review; never loosen selectors merely to suppress an alert.
 
@@ -61,7 +65,7 @@ parking-bot check --dry-run
 parking-bot health
 ```
 
-`auth start` must use an interactive TTY and holds the browser lock. If a check owns that lock, retry after it finishes (bounded to two minutes). Authentication-required alerts pause requests; daily reminders continue until validated renewal. The scheduler resumes automatically while preserving a future next-check time. It does not send an availability DM merely from viewing the login desktop; a scheduled fresh observation supplies that event.
+`auth start` must use an interactive TTY and holds the browser lock. If a check owns that lock, retry after it finishes (bounded to two minutes). Authentication-required alerts pause requests; daily reminders continue until validated renewal, without pings. The scheduler resumes automatically while preserving a future next-check time. It does not send an availability alert merely from viewing the login desktop; a scheduled fresh observation supplies that event. Ordinary hourly checks and confirmed closure do not send notifications.
 
 Status shows the last result/reason/time, last successful check, next eligible check, auth condition, notification error, consecutive transient failures, heartbeat, and pending message count. Times are UTC epoch seconds. Logs contain result categories and safe reasons only. A healthy process can still need login or have broken Discord delivery: inspect status as well as Docker health. Docker health alone sends no external alert. A stopped NAS or broken Discord channel cannot report its own failure; independent uptime monitoring is outside v1.
 
@@ -71,7 +75,19 @@ Push a version tag such as `v0.1.0` after reviewing tests. GitHub Actions tests 
 
 Before upgrading, note the existing image digest, stop the app, and snapshot/back up the entire restricted data directory (including SQLite WAL files if present). Stopping first makes a filesystem copy consistent. Keep schema backups paired with image versions. Update the YAML image to the selected version or digest, restart, inspect health/status, and verify session reuse at the next scheduled check. Do not reset `next_check` to force repeated checks. To roll back, stop the app, restore the matching database backup if a schema upgrade occurred, and select the prior image reference. This release uses schema version 1 and rejects unknown versions.
 
-Rotate the token in Discord, then overwrite the existing host token file in place using a secure editor while the app is stopped; preserve mode/owner. Editors that replace the inode can leave an existing bind mount on the old file, so restart/recreate the app after rotation. Run `notify-test` and inspect delivery failures. For a different bot identity, clear the `dm_channel` row from SQLite's `meta` table while stopped, then test; the usual same-bot token rotation does not need this.
+To migrate from recipient DMs to `#parking-alerts`:
+
+1. Prepare the channel, permissions, and ID as described above.
+2. Stop the existing deployment and back up its persistent data using the procedure above.
+3. Replace `PARKING_RECIPIENT` with `PARKING_CHANNEL_ID`, update the image, and restart using the existing database. The old variable has no effect, including when both are present; it is never a fallback.
+4. Run `parking-bot notify-test` once and confirm one channel message without a ping. Inspect health and notification status.
+5. Confirm the next naturally occurring availability alert includes an active `@everyone` mention, and operational notices remain unmentioned. Do not reset the schedule or manufacture availability for acceptance.
+
+This migration requires no schema change or database cleanup. Observation history, availability episodes, delivery timestamps, pending events, retry deadlines, and rate-limit state remain intact. Still-eligible pending events go to the new channel with the new mention policy; stale or cancelled events stay unsent. Already-sent events are not replayed, and reminder windows are not reset. Historical `dm_channel` metadata is inert. Destination-specific nonces distinguish new channel attempts from previous DM attempts while remaining stable across retries to the same channel.
+
+To roll back this migration, restore the prior image and its `PARKING_RECIPIENT` configuration. No schema rollback is needed; history continues to reflect notifications successfully delivered during the channel deployment.
+
+Rotate the token in Discord, then overwrite the existing host token file in place using a secure editor while the app is stopped; preserve mode/owner. Editors that replace the inode can leave an existing bind mount on the old file, so restart/recreate the app after rotation. Run `notify-test` and inspect delivery failures. For a different bot identity, grant the new bot the same channel permissions and test; no cached destination metadata needs clearing.
 
 ## 6. Acceptance log: 48-hour TrueNAS soak
 
@@ -81,7 +97,7 @@ Do not mark the deployment accepted until the following are recorded on the targ
 - A fresh headless process reuses the university session. Record sign-in time and any expiry time over 48 hours; do not assume a renewal interval.
 - Confirm the calibrated readiness signal, intervening navigation, permit identity, disabled behavior, and relevant network requests on the actual page. If one availability state cannot be observed, mark it as unverified rather than changing inventory.
 - Checks occur hourly plus jitter; restarting does not create an immediate extra check or replay missed checks. Restart once during the soak and confirm state survives.
-- A first available observation creates one DM; reminders occur only after 24 hours and a fresh confirmation. Closure/reopening behavior is fixture-tested; observe live if it happens naturally.
+- A first available observation creates one channel message with an active `@everyone` mention; reminders occur only after 24 hours and a fresh confirmation. Confirm operational notices and setup tests have no ping. Closure/reopening behavior is fixture-tested; observe live if it happens naturally.
 - Expired authentication pauses polling, alerts once, reminds daily, and resumes after renewal. Check UNKNOWN and notification-failure visibility using local fixtures rather than disrupting university services.
 - Verify NAS VPN-only port reachability, Chromium sandbox launch, permissions, graceful shutdown, heartbeat, memory/CPU peaks, backup recovery, and rollback.
 

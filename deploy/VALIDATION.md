@@ -1,6 +1,28 @@
 # Implementation verification
 
-Local verification completed on 2026-09-19. These results use sanitized fixtures, not a university account.
+## Channel notification migration — 2026-09-22
+
+Verification for the switch to `PARKING_CHANNEL_ID` and `#parking-alerts` used a temporary virtual environment with Python 3.14.7 and pinned Playwright 1.58.0. No real Discord notifications or university requests were made.
+
+| Check | Result |
+| --- | --- |
+| `ruff check .` | Passed |
+| Complete `pytest -q` suite | 115 passed, including rendered Chromium fixtures |
+| Configuration and CLI | Missing/malformed channel IDs rejected before HTTP client allocation; legacy-only configuration rejected; new variable wins when both exist; offline commands and authentication setup work without a destination |
+| Direct delivery and mention policy | One channel message POST per attempt; legacy DM cache ignored; initial availability, reopening, and daily availability reminders enable only the intentional broadcast mention; operational notices/reminders and setup tests disable mentions |
+| Retry and failure handling | Destination-specific 24-character nonces stable across retries/restarts; timeout, server error, rate limits, retry deadlines, exponential backoff, token rereading, locking, invalid responses, and sanitized channel diagnostics covered |
+| Existing schema-version-1 state | History, timestamps, episodes, pending events, retry/rate-limit deadlines preserved on reopen; sent events not replayed; stale/cancelled events unsent; reminder timing unchanged |
+| Explicit setup test | Mocked success/failure output and client cleanup passed; successful setup test leaves scheduled history untouched |
+| Container build and offline container smoke | Not rerun for this change; existing CI includes both checks |
+| Real channel posting and active availability mention | Not performed; follow the runbook's migration and acceptance steps |
+
+The agent sandbox initially blocked Chromium launch with `Operation not permitted`; the complete suite passed after running outside that restriction, with Chromium's own sandbox still enabled. Playwright used its Ubuntu 24.04 fallback browser build on this Linux host. All fixture browser requests were intercepted and Discord delivery used mock transports.
+
+For deployment, prepare `#parking-alerts` and its permissions, back up the stopped deployment, replace `PARKING_RECIPIENT` with `PARKING_CHANNEL_ID`, and keep the existing database. Run `notify-test` once to confirm posting without a ping. Separately verify the next naturally occurring availability alert's active `@everyone` mention; the setup test does not establish mention permission. See [the migration runbook](RUNBOOK.md#5-releases-upgrades-backups-rollback-and-token-rotation).
+
+## Historical implementation validation — 2026-09-19
+
+The following results predate the channel migration and are retained as historical evidence. They use sanitized fixtures, not a university account, and do not establish validation of the current container image.
 
 | Check | Result |
 | --- | --- |
@@ -17,7 +39,7 @@ Local verification completed on 2026-09-19. These results use sanitized fixtures
 | Persistent named-volume state across restart | Pending event and notification-failure timestamp preserved; no extra event |
 | GitHub Actions execution/GHCR publication | Configured, not executed or published in this workspace |
 | University login, MFA, authenticated navigation/readiness | Not performed; requires administrator account |
-| Real Discord DM | Not sent; requires explicit setup invocation with configured bot |
+| Real Discord DM (historical workflow) | Not sent during the original validation |
 | TrueNAS deployment and 48-hour soak | Not performed; use the runbook acceptance checklist |
 
 All browser-fixture traffic was intercepted. Container desktop verification used `--network none` and a loopback fixture server. The scheduler restart test had no session or token and made no external requests. Temporary test containers and volumes were removed; the built local image remains available.

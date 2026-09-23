@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import time
 
 import httpx
@@ -13,9 +14,8 @@ class DeliveryError(Exception):
         self.delay = delay
 
 
-def rejection_reason(response, path):
+def rejection_reason(response):
     """Report only known local text and a numeric code, never response bodies."""
-    operation = 'create DM' if path == '/users/@me/channels' else 'send DM'
     details = f'HTTP {response.status_code}'
     code = None
     try:
@@ -27,18 +27,23 @@ def rejection_reason(response, path):
     except ValueError:
         pass
     hints = {
-        50001: 'Missing access. Verify the bot identity, recipient ID, and shared server.',
-        50007: 'Cannot send messages to this user. Check the recipient ID, shared server, DM privacy, and blocked users.',
-        50013: 'Missing permissions for this resource. Verify the bot identity and DM channel access.',
+        10003: 'Unknown channel. Check the channel ID and whether the channel still exists.',
+        50001: 'Missing access. Check bot membership and channel visibility.',
+        50013: 'Missing permissions. Check effective channel permissions for the bot.',
     }
     hint = hints.get(code, '')
     if not hint and response.status_code == 401:
         hint = 'Check that the token file contains the current bot token.'
-    return f'Discord rejected {operation} ({details})' + (f': {hint}' if hint else '')
+    return f'Discord rejected send channel message ({details})' + (f': {hint}' if hint else '')
 
 
 class Discord:
     def __init__(self, cfg, state, client=None):
+        channel_id = cfg.channel_id
+        if (not isinstance(channel_id, str) or not channel_id.isascii()
+                or not channel_id.isdecimal() or not channel_id.strip('0')):
+            raise ValueError('Configure PARKING_CHANNEL_ID with a positive numeric Discord channel ID '
+                             '(ASCII digits only). PARKING_RECIPIENT is no longer supported.')
         self.cfg = cfg
         self.state = state
         self.client = client or httpx.AsyncClient(timeout=20, follow_redirects=False)
@@ -52,8 +57,8 @@ class Discord:
             raise DeliveryError('Discord rate limited', remaining)
         try:
             token = self.cfg.token_file.read_text().strip()
-            if not token or not self.cfg.recipient.isdecimal():
-                raise DeliveryError('Discord token or recipient is not configured', 86400)
+            if not token:
+                raise DeliveryError('Discord token is not configured', 86400)
             response = await self.client.post('https://discord.com/api/v10' + path,
                                              headers={'Authorization': 'Bot ' + token}, json=payload)
         except OSError:
@@ -73,7 +78,7 @@ class Discord:
         if response.status_code >= 500:
             raise DeliveryError('Discord service error')
         if response.status_code >= 400:
-            raise DeliveryError(rejection_reason(response, path), 86400)
+            raise DeliveryError(rejection_reason(response), 86400)
         try:
             result = response.json()
             if not isinstance(result, dict) or not str(result.get('id', '')).isdecimal():
@@ -82,15 +87,14 @@ class Discord:
         except ValueError:
             raise DeliveryError('Unexpected Discord response') from None
 
-    async def send(self, body, nonce):
-        cache = self.state.get('dm_channel')
-        if not cache or cache['recipient'] != self.cfg.recipient:
-            channel = await self.post('/users/@me/channels', {'recipient_id': self.cfg.recipient})
-            cache = {'recipient': self.cfg.recipient, 'id': channel['id']}
-            with self.state.db:
-                self.state.put('dm_channel', cache)
-        await self.post(f"/channels/{cache['id']}/messages", {
-            'content': body, 'nonce': nonce, 'enforce_nonce': True, 'allowed_mentions': {'parse': []}})
+    async def send(self, body, nonce, *, mention_everyone=False):
+        body = body.replace('@everyone', '@\u200beveryone').replace('@here', '@\u200bhere')
+        if mention_everyone:
+            body = '@everyone\n' + body
+        nonce = hashlib.sha256(f'{self.cfg.channel_id}:{nonce}'.encode()).hexdigest()[:24]
+        await self.post(f'/channels/{self.cfg.channel_id}/messages', {
+            'content': body, 'nonce': nonce, 'enforce_nonce': True,
+            'allowed_mentions': {'parse': ['everyone'] if mention_everyone else []}})
 
 
 async def deliver_once(discord, state, now=None):
@@ -106,7 +110,7 @@ async def deliver_once(discord, state, now=None):
             if event is None:
                 return
             try:
-                await discord.send(event['body'], event['id'])
+                await discord.send(event['body'], event['id'], mention_everyone=event['kind'] == 'availability')
             except DeliveryError as error:
                 state.delivery_failed(event, now, str(error), max(error.delay, min(3600, 60 * 2 ** min(event['attempts'], 6))))
             else:

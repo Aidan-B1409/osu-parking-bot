@@ -15,7 +15,7 @@ class Config:
     interval: int = 3600
     reminder: int = 86400
     timezone: str = 'America/Los_Angeles'
-    recipient: str = ''
+    channel_id: str = ''
     token_file: Path = Path('/run/secrets/discord_token')
     ready_selector: str = ''
     navigation: tuple[str, ...] = ()
