@@ -1,5 +1,21 @@
 # Implementation verification
 
+## Online presence — 2026-09-22
+
+Added `discord.py==2.7.1` for a background Gateway connection during `parking-bot run`. Local verification used the same temporary Python 3.14.7 environment described below.
+
+| Check | Result |
+| --- | --- |
+| `ruff check .` | Passed |
+| Complete `pytest -q` suite | 124 passed, including rendered Chromium fixtures |
+| Presence configuration and cleanup | Online status with zero intents; reconnect enabled; cancellation closes the client |
+| Failed starts and tokens | Safe diagnostics, bounded retry delays, token rereading, missing-token handling, and cancellation during retry covered |
+| Scheduler integration | Monitoring proceeds while presence connects; shutdown cancels presence; authentication pause still runs presence |
+| Real Discord presence | Not tested; rebuild/restart the deployed image and check online, reconnect, and shutdown behavior using the runbook |
+| Container build and offline smoke | Not rerun; existing CI includes both checks |
+
+Gateway startup was mocked, Discord message delivery used mock transports, and browser fixture traffic was intercepted. No real notifications, Gateway connections, or university requests were made. The full suite ran outside the agent sandbox with Chromium's own sandbox enabled. Heartbeat and session-resume protocol handling is delegated to discord.py, rather than independently validated by these mocked tests.
+
 ## Channel notification migration — 2026-09-22
 
 Verification for the switch to `PARKING_CHANNEL_ID` and `#parking-alerts` used a temporary virtual environment with Python 3.14.7 and pinned Playwright 1.58.0. No real Discord notifications or university requests were made.

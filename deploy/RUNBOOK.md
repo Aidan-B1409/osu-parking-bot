@@ -2,7 +2,7 @@
 
 ## 1. Prepare Discord and storage
 
-Create a bot at the [Discord Developer Portal](https://discord.com/developers/applications). Install it in your server with the bot scope. Create or select a normal server text channel named `#parking-alerts`. Grant the bot effective **View Channel**, **Send Messages**, and **Mention @everyone, @here, and All Roles** permissions in that channel; channel permission overrides must allow these operations. Ensure intended recipients can view the channel. Enable Developer Mode in Discord and copy the channel's numeric ID into `PARKING_CHANNEL_ID`. Administrator permission, member enumeration, and privileged Gateway intents are unnecessary for this REST-only workflow. The app posts directly by ID without name lookup or channel creation. See [Discord permissions](https://docs.discord.com/developers/topics/permissions). Store the bot token in a dedicated file, not an environment variable or Compose YAML.
+Create a bot at the [Discord Developer Portal](https://discord.com/developers/applications). Install it in your server with the bot scope. Create or select a normal server text channel named `#parking-alerts`. Grant the bot effective **View Channel**, **Send Messages**, and **Mention @everyone, @here, and All Roles** permissions in that channel; channel permission overrides must allow these operations. Ensure intended recipients can view the channel. Enable Developer Mode in Discord and copy the channel's numeric ID into `PARKING_CHANNEL_ID`. Administrator permission, member enumeration, and privileged Gateway intents are unnecessary. The app posts directly by ID without name lookup or channel creation. See [Discord permissions](https://docs.discord.com/developers/topics/permissions). Store the bot token in a dedicated file, not an environment variable or Compose YAML.
 
 Create a dedicated TrueNAS dataset and secret directory. The image runs as `pwuser`, UID/GID 1000; match ownership or set the Compose user to your dataset owner and verify browser launch. Example commands in the NAS shell (replace POOL):
 
@@ -54,6 +54,10 @@ Default recognized auth hosts are Microsoft login and OSU login. Add actual veri
 
 ## 4. Everyday operation and renewal
 
+`parking-bot run` also maintains a Gateway connection so the bot appears online in Discord. Rebuild/update the image and restart to enable this behavior; no new environment variables or portal toggles are needed. Allow outbound HTTPS and secure WebSocket connections to Discord (port 443); no inbound port is required. Presence uses the same bot token with all Gateway intents disabled. It reconnects automatically and closes during shutdown. Failed client starts retry after one to five minutes and reread the token; restart after token rotation as described below. Safe presence errors appear in application logs. Gateway failures do not interrupt checks or REST message delivery.
+
+An online indicator does not establish that university authentication or notification delivery is healthy. The bot stays online while monitoring is paused for sign-in. Use status and health below to inspect the application. `notify-test` tests posting only and does not bring an otherwise stopped bot online.
+
 Run commands inside the application shell:
 
 ```sh
@@ -97,6 +101,7 @@ Do not mark the deployment accepted until the following are recorded on the targ
 - A fresh headless process reuses the university session. Record sign-in time and any expiry time over 48 hours; do not assume a renewal interval.
 - Confirm the calibrated readiness signal, intervening navigation, permit identity, disabled behavior, and relevant network requests on the actual page. If one availability state cannot be observed, mark it as unverified rather than changing inventory.
 - Checks occur hourly plus jitter; restarting does not create an immediate extra check or replay missed checks. Restart once during the soak and confirm state survives.
+- Confirm the running bot appears online in Discord, reconnects after a temporary connection loss, and goes offline after shutdown once Discord processes the disconnect. No privileged intents should be enabled for this feature.
 - A first available observation creates one channel message with an active `@everyone` mention; reminders occur only after 24 hours and a fresh confirmation. Confirm operational notices and setup tests have no ping. Closure/reopening behavior is fixture-tested; observe live if it happens naturally.
 - Expired authentication pauses polling, alerts once, reminds daily, and resumes after renewal. Check UNKNOWN and notification-failure visibility using local fixtures rather than disrupting university services.
 - Verify NAS VPN-only port reachability, Chromium sandbox launch, permissions, graceful shutdown, heartbeat, memory/CPU peaks, backup recovery, and rollback.

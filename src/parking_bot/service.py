@@ -4,6 +4,7 @@ import time
 
 from .browser import check
 from .notify import Discord, worker
+from .presence import maintain_presence
 from .storage import lock
 
 log = logging.getLogger(__name__)
@@ -18,7 +19,8 @@ async def run(cfg, state, stop):
                     state.put('heartbeat', time.time())
                 await asyncio.sleep(10)
 
-        tasks = [asyncio.create_task(heartbeat()), asyncio.create_task(worker(discord, state, stop))]
+        tasks = [asyncio.create_task(heartbeat()), asyncio.create_task(worker(discord, state, stop)),
+                 asyncio.create_task(maintain_presence(cfg))]
         try:
             while not stop.is_set():
                 for task in tasks:

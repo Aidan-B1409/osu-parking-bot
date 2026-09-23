@@ -29,7 +29,7 @@ Python 3.12+ on Linux is required. Tests intercept browser traffic and mock Disc
 
 | Command | Purpose |
 | --- | --- |
-| `parking-bot run` | Scheduler, heartbeat, and independent notification retries |
+| `parking-bot run` | Scheduler, heartbeat, Discord online presence, and independent notification retries |
 | `parking-bot check --dry-run` | One live read-only check, no notifications or notification-history changes |
 | `parking-bot auth start` | Foreground temporary remote browser; keep the terminal open |
 | `parking-bot auth status` / `stop` | Inspect or cancel renewal from another shell |
@@ -66,7 +66,9 @@ Environment variables use the `PARKING_` prefix. Configuration errors stop start
 
 Navigation selectors must only advance to permit selection. Never configure purchase, cart, or checkout actions. Do not use `body` or an early-loading container as readiness merely to pass validation. See the runbook for calibration.
 
-Create or select a normal server text channel named `#parking-alerts`, enable Discord Developer Mode, and copy its channel ID into `PARKING_CHANNEL_ID`. Grant the bot effective **View Channel**, **Send Messages**, and **Mention @everyone, @here, and All Roles** permissions there, including channel overrides. Intended recipients must be able to view it. Administrator permission, member enumeration, and privileged Gateway intents are unnecessary for this REST-only workflow. The bot posts directly by ID; it does not look up names or create channels. See [Discord permissions](https://docs.discord.com/developers/topics/permissions) and the [setup and migration runbook](deploy/RUNBOOK.md).
+Create or select a normal server text channel named `#parking-alerts`, enable Discord Developer Mode, and copy its channel ID into `PARKING_CHANNEL_ID`. Grant the bot effective **View Channel**, **Send Messages**, and **Mention @everyone, @here, and All Roles** permissions there, including channel overrides. Intended recipients must be able to view it. Administrator permission, member enumeration, and privileged Gateway intents are unnecessary. The bot posts directly by ID; it does not look up names or create channels. See [Discord permissions](https://docs.discord.com/developers/topics/permissions) and the [setup and migration runbook](deploy/RUNBOOK.md).
+
+While `parking-bot run` is active, a background [Discord Gateway connection](https://docs.discord.com/developers/events/gateway) advertises the bot as online. It uses the existing token file and no Gateway intents. `discord.py` handles heartbeats, reconnection, and session resume; failed client starts retry with a delay of one to five minutes and reread the token. Presence failures do not stop portal checks or REST notifications. Shutdown closes the connection. One-shot commands such as `notify-test` do not establish presence. The online indicator means Discord is connected; use `status --json` and `health` to assess monitoring, authentication, and delivery.
 
 ## Behavior and delivery guarantees
 
@@ -84,6 +86,6 @@ Polling failures back off to 2, 4, and 8 hours, with a longer Retry-After honore
 
 ## Layout and references
 
-`browser.py` inspects rendered pages and handles session snapshots; `auth.py` manages temporary desktop renewal; `state.py` owns SQLite transitions and the outbox; `notify.py` handles Discord REST; `service.py` schedules work; `cli.py` exposes the commands. Browser and scheduler locks are Linux advisory file locks. Session replacement uses mode-0600 temporary files, fsync, and atomic rename.
+`browser.py` inspects rendered pages and handles session snapshots; `auth.py` manages temporary desktop renewal; `state.py` owns SQLite transitions and the outbox; `notify.py` handles Discord REST; `presence.py` maintains online presence; `service.py` schedules work; `cli.py` exposes the commands. Browser and scheduler locks are Linux advisory file locks. Session replacement uses mode-0600 temporary files, fsync, and atomic rename.
 
 The implementation follows [Playwright storage-state APIs](https://playwright.dev/python/docs/api/class-browsercontext#browser-context-storage-state), [Playwright container guidance](https://playwright.dev/python/docs/docker), [Discord message/nonce semantics](https://docs.discord.com/developers/resources/message#create-message), and [Discord rate limits](https://docs.discord.com/developers/topics/rate-limits). The included [seccomp profile](deploy/chromium-seccomp.json) starts from [Moby’s default profile](https://github.com/moby/profiles/blob/main/seccomp/default.json) and adds the `clone`, `setns`, and `unshare` allowances documented by Playwright. See [profile provenance](deploy/SECCOMP.md) and the included upstream licenses.
