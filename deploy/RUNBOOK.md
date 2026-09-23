@@ -4,6 +4,8 @@
 
 Create a bot at the [Discord Developer Portal](https://discord.com/developers/applications). Install it in your server with the bot scope. Create or select a normal server text channel named `#parking-alerts`. Grant the bot effective **View Channel**, **Send Messages**, and **Mention @everyone, @here, and All Roles** permissions in that channel; channel permission overrides must allow these operations. Ensure intended recipients can view the channel. Enable Developer Mode in Discord and copy the channel's numeric ID into `PARKING_CHANNEL_ID`. Administrator permission, member enumeration, and privileged Gateway intents are unnecessary. The app posts directly by ID without name lookup or channel creation. See [Discord permissions](https://docs.discord.com/developers/topics/permissions). Store the bot token in a dedicated file, not an environment variable or Compose YAML.
 
+Confirm the app installation has the `applications.commands` scope, which Discord automatically includes with the bot scope. Members who should control silence need **Use Application Commands** in the configured channel and access to `/silence` and `/unsilence` in the server's app command permissions. The bot applies no additional user or role restrictions. Commands are registered only in the configured channel's server and reject other channels, threads, and DMs privately. See [Discord application commands](https://docs.discord.com/developers/interactions/application-commands).
+
 Create a dedicated TrueNAS dataset and secret directory. The image runs as `pwuser`, UID/GID 1000; match ownership or set the Compose user to your dataset owner and verify browser launch. Example commands in the NAS shell (replace POOL):
 
 ```sh
@@ -58,6 +60,12 @@ Default recognized auth hosts are Microsoft login and OSU login. Add actual veri
 
 An online indicator does not establish that university authentication or notification delivery is healthy. The bot stays online while monitoring is paused for sign-in. Use status and health below to inspect the application. `notify-test` tests posting only and does not bring an otherwise stopped bot online.
 
+In `#parking-alerts`, `/silence` pauses availability alerts and reminders for exactly **25 × 24 hours** from the saved change. Repeating it restarts that interval. `/unsilence` ends the pause early; if alerts are already enabled it reports that without changing notification history. Both confirmations are public and disable mentions, and the silence confirmation shows a localized expiration date and relative time. Anyone Discord permits to use these commands in the channel can invoke them.
+
+Silence cancels queued availability messages and retries. Observations and availability episode transitions continue; sent events and successful delivery timestamps remain intact. Monitoring, online presence, authentication notices/reminders, monitoring-error notices, and `notify-test` continue. Expiration and `/unsilence` require a fresh scheduled observation before another availability notification, following existing reminder timing. They do not force a portal check, replay suppressed alerts, or post a separate expiration notice.
+
+The client registers commands once per startup in an owned background task, retrying failures after one to five minutes without blocking monitoring or presence. No interaction web server, inbound port, new configuration, or privileged intent is needed. If commands do not appear, inspect sanitized registration diagnostics, the channel ID, bot access, and installation scope. Commands acknowledge promptly and wait up to 30 seconds for the delivery lock; a busy response changes nothing. A failed confirmation can occur after a successful save: inspect persisted status before retrying `/silence`, since retrying extends the deadline.
+
 Run commands inside the application shell:
 
 ```sh
@@ -72,6 +80,19 @@ parking-bot health
 `auth start` must use an interactive TTY and holds the browser lock. If a check owns that lock, retry after it finishes (bounded to two minutes). Authentication-required alerts pause requests; daily reminders continue until validated renewal, without pings. The scheduler resumes automatically while preserving a future next-check time. It does not send an availability alert merely from viewing the login desktop; a scheduled fresh observation supplies that event. Ordinary hourly checks and confirmed closure do not send notifications.
 
 Status shows the last result/reason/time, last successful check, next eligible check, auth condition, notification error, consecutive transient failures, heartbeat, and pending message count. Times are UTC epoch seconds. Logs contain result categories and safe reasons only. A healthy process can still need login or have broken Discord delivery: inspect status as well as Docker health. Docker health alone sends no external alert. A stopped NAS or broken Discord channel cannot report its own failure; independent uptime monitoring is outside v1.
+
+Status also includes `availability_silenced_until`, the UTC epoch deadline (zero or missing metadata means enabled), and `availability_silenced`, computed against the current time. An expired deadline can remain stored while the boolean is false. Silence persists across restarts and destination changes because it applies to this deployment's configured notification stream. It uses the existing schema version 1. An older image without silence support will stop enforcing the saved deadline after rollback.
+
+### Slash-command deployment acceptance
+
+These are live operator steps, separate from mocked test evidence:
+
+1. Back up the stopped deployment as described below. Rebuild the image with this change, update the deployed image reference, and restart using the existing data directory.
+2. Confirm `/silence` and `/unsilence` appear in the configured server, and an ordinary channel member with **Use Application Commands** can invoke them. Confirm the installation scope and command permissions above; do not enable privileged intents.
+3. Invoke `/silence` in `#parking-alerts`. Verify its public confirmation has no ping and shows an expiration 25 days ahead in localized date and relative-time formats. Run `parking-bot status --json` and confirm `availability_silenced` is true and the saved deadline matches the confirmation to the displayed second.
+4. Restart once and inspect status again: the deadline must persist. Confirm monitoring and online presence continue. If desired, run the explicit `notify-test` while silenced and verify its unmentioned setup message still arrives.
+5. Invoke `/unsilence`. Verify its public confirmation has no ping and status shows a zero deadline and false boolean. A second invocation should say alerts are already enabled. No availability notification or portal check should be forced; inspect the next naturally scheduled observation and existing reminder timing.
+6. Record sanitized outcomes and image digest in the private acceptance log. Suppression, expiration boundaries, retries, and lock contention are covered by local fixtures; do not manufacture university availability or wait 25 days merely to reproduce those tests.
 
 ## 5. Releases, upgrades, backups, rollback, and token rotation
 
@@ -102,6 +123,7 @@ Do not mark the deployment accepted until the following are recorded on the targ
 - Confirm the calibrated readiness signal, intervening navigation, permit identity, disabled behavior, and relevant network requests on the actual page. If one availability state cannot be observed, mark it as unverified rather than changing inventory.
 - Checks occur hourly plus jitter; restarting does not create an immediate extra check or replay missed checks. Restart once during the soak and confirm state survives.
 - Confirm the running bot appears online in Discord, reconnects after a temporary connection loss, and goes offline after shutdown once Discord processes the disconnect. No privileged intents should be enabled for this feature.
+- Complete the slash-command deployment acceptance steps above, including persisted silence and restoring alerts with `/unsilence`.
 - A first available observation creates one channel message with an active `@everyone` mention; reminders occur only after 24 hours and a fresh confirmation. Confirm operational notices and setup tests have no ping. Closure/reopening behavior is fixture-tested; observe live if it happens naturally.
 - Expired authentication pauses polling, alerts once, reminds daily, and resumes after renewal. Check UNKNOWN and notification-failure visibility using local fixtures rather than disrupting university services.
 - Verify NAS VPN-only port reachability, Chromium sandbox launch, permissions, graceful shutdown, heartbeat, memory/CPU peaks, backup recovery, and rollback.

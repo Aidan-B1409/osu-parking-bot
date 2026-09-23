@@ -37,6 +37,8 @@ Python 3.12+ on Linux is required. Tests intercept browser traffic and mock Disc
 | `parking-bot status --json` | Results, UTC timestamps, schedule, auth condition, delivery failures |
 | `parking-bot health` | Local scheduler heartbeat, lock, and database access; no network requests |
 
+In the configured `#parking-alerts` channel, anyone allowed to use application commands can invoke `/silence` to pause availability alerts and reminders for **25 × 24 hours**, or `/unsilence` to end the pause early. Each `/silence` restarts the interval from the saved change. Confirmations have mentions disabled; `/silence` displays the expiration in Discord's localized date and relative-time formats. Invocations in DMs, threads, or other channels are rejected privately. `/unsilence` reports when alerts are already enabled without changing notification history.
+
 Dry runs honor the persisted polling schedule and reserve the next eligible check to prevent restart/manual request bursts. They do not refresh session state. Authentication validation is an explicit setup action, separate from the polling schedule. Normal polling pauses after recognized authentication loss until successful renewal.
 
 ## Configuration
@@ -70,11 +72,17 @@ Create or select a normal server text channel named `#parking-alerts`, enable Di
 
 While `parking-bot run` is active, a background [Discord Gateway connection](https://docs.discord.com/developers/events/gateway) advertises the bot as online. It uses the existing token file and no Gateway intents. `discord.py` handles heartbeats, reconnection, and session resume; failed client starts retry with a delay of one to five minutes and reread the token. Presence failures do not stop portal checks or REST notifications. Shutdown closes the connection. One-shot commands such as `notify-test` do not establish presence. The online indicator means Discord is connected; use `status --json` and `health` to assess monitoring, authentication, and delivery.
 
+The Gateway client resolves the configured channel's server through Discord's channel API and registers `/silence` and `/unsilence` only in that server. Registration retries with a delay of one to five minutes without interrupting presence or monitoring. Confirm the app has the `applications.commands` scope (automatically included with bot installation), and members have **Use Application Commands** permission and access to these commands. No new configuration, privileged intents, or interaction web server is needed. See [Discord application commands](https://docs.discord.com/developers/interactions/application-commands).
+
 ## Behavior and delivery guarantees
 
 The checker requires one visible matching button, the exact normalized label and value, and verified page readiness. Any `disabled` attribute means unavailable, even `disabled="false"`. Inherited disabling, aria-disabled, hidden/duplicate/renamed/missing controls mean unknown. Recognized sign-in screens mean authentication required. Generic 403, server errors, timeouts, or missing controls never imply unavailable or expired authentication.
 
 Unknown results preserve the availability episode. Only confirmed unavailability closes it. The initial available observation and each reopening create an alert. Repeated availability sends a reminder no sooner than 24 hours after the last successful availability delivery. A reopening can send sooner because it is a new episode. Reminders always require a fresh check.
+
+While silenced, monitoring, online presence, authentication notices, monitoring-error notices, and explicit setup tests continue. Applying silence cancels pending availability events, including retries, while preserving sent events, delivery timestamps, observations, and episodes. Checks keep recording episode transitions without queuing availability messages. Commands wait up to 30 seconds for a send already in progress; a busy result changes nothing. After expiration or `/unsilence`, a fresh scheduled observation is required and existing reminder timing applies. There is no forced check, replay of suppressed alerts, or separate expiration message.
+
+`status --json` includes `availability_silenced_until` (UTC epoch seconds; missing or zero means enabled) and the computed `availability_silenced` boolean. Silence survives restarts and follows this deployment's notification stream if the destination changes. Schema version remains 1. Rolling back to an image without this feature stops enforcing the saved silence.
 
 Pending messages persist before REST calls, use a stable nonce, and are marked sent only after success. Unsent availability messages expire after one hour unless reconfirmed and are cancelled on confirmed closure. Delivery retries run independently every five seconds when eligible, with exponential delay; rate limits and longer server delays take precedence. Invalid tokens or channel access/permission errors retry daily and appear in status. Operational alerts are immediate for layout/authentication failures and after three consecutive transient check failures; repeated alerts are limited to daily. Resolved pending operational alerts are cancelled.
 
@@ -86,6 +94,6 @@ Polling failures back off to 2, 4, and 8 hours, with a longer Retry-After honore
 
 ## Layout and references
 
-`browser.py` inspects rendered pages and handles session snapshots; `auth.py` manages temporary desktop renewal; `state.py` owns SQLite transitions and the outbox; `notify.py` handles Discord REST; `presence.py` maintains online presence; `service.py` schedules work; `cli.py` exposes the commands. Browser and scheduler locks are Linux advisory file locks. Session replacement uses mode-0600 temporary files, fsync, and atomic rename.
+`browser.py` inspects rendered pages and handles session snapshots; `auth.py` manages temporary desktop renewal; `state.py` owns SQLite transitions and the outbox; `notify.py` handles Discord REST; `presence.py` maintains online presence and slash commands; `service.py` schedules work; `cli.py` exposes the local commands. Browser, delivery, and scheduler locks are Linux advisory file locks. Session replacement uses mode-0600 temporary files, fsync, and atomic rename.
 
 The implementation follows [Playwright storage-state APIs](https://playwright.dev/python/docs/api/class-browsercontext#browser-context-storage-state), [Playwright container guidance](https://playwright.dev/python/docs/docker), [Discord message/nonce semantics](https://docs.discord.com/developers/resources/message#create-message), and [Discord rate limits](https://docs.discord.com/developers/topics/rate-limits). The included [seccomp profile](deploy/chromium-seccomp.json) starts from [Moby’s default profile](https://github.com/moby/profiles/blob/main/seccomp/default.json) and adds the `clone`, `setns`, and `unshare` allowances documented by Playwright. See [profile provenance](deploy/SECCOMP.md) and the included upstream licenses.

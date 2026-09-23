@@ -1,6 +1,7 @@
 import json
 import random
 import sqlite3
+import time
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -8,6 +9,7 @@ from zoneinfo import ZoneInfo
 from .browser import Result
 
 DAY = 86400
+SILENCE_DURATION = 25 * DAY
 
 
 class State:
@@ -41,6 +43,24 @@ class State:
 
     def put(self, key, value):
         self.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', (key, json.dumps(value)))
+
+    def availability_silenced(self, now):
+        return now < self.get('availability_silenced_until', 0)
+
+    def silence_availability(self, now=None):
+        # The caller holds delivery.lock, including against sends already in flight.
+        with self.db:
+            self.db.execute("UPDATE events SET status='cancelled' WHERE kind='availability' AND status='pending'")
+            until = (time.time() if now is None else now) + SILENCE_DURATION
+            self.put('availability_silenced_until', until)
+        return until
+
+    def unsilence_availability(self, now=None):
+        with self.db:
+            if not self.availability_silenced(time.time() if now is None else now):
+                return False
+            self.put('availability_silenced_until', 0)
+        return True
 
     def enqueue(self, kind, body, now, episode=None, expires=None):
         self.db.execute('''INSERT INTO events
@@ -87,6 +107,8 @@ class State:
                     episode = self.get('episode') or str(uuid.uuid4())
                     self.put('episode', episode)
                     self.put('confirmed', result)
+                    if self.availability_silenced(now):
+                        return
                     pending = self.db.execute("SELECT id FROM events WHERE kind='availability' AND status='pending' AND episode=?",
                                               (episode,)).fetchone()
                     if pending:
@@ -119,7 +141,9 @@ class State:
     def due_event(self, now):
         with self.db:
             self.db.execute("UPDATE events SET status='expired' WHERE status='pending' AND expires<=?", (now,))
-        return self.db.execute("SELECT * FROM events WHERE status='pending' AND next_attempt<=? ORDER BY created LIMIT 1", (now,)).fetchone()
+        return self.db.execute('''SELECT * FROM events WHERE status='pending' AND next_attempt<=?
+            AND (kind!='availability' OR ?=0) ORDER BY created LIMIT 1''',
+            (now, self.availability_silenced(now))).fetchone()
 
     def delivered(self, event, now):
         with self.db:
@@ -140,6 +164,8 @@ class State:
         keys = ['last_result', 'last_success', 'next_check', 'auth_required', 'auth_installed',
                 'confirmed', 'heartbeat', 'notification_error', 'discord_not_before', 'failures']
         output = {key: self.get(key) for key in keys}
+        output['availability_silenced_until'] = self.get('availability_silenced_until', 0)
+        output['availability_silenced'] = time.time() < output['availability_silenced_until']
         output['auth_required'] = self.get('auth_required', not self.cfg.session_path.exists())
         output['pending_messages'] = self.db.execute("SELECT count(*) FROM events WHERE status='pending'").fetchone()[0]
         return output

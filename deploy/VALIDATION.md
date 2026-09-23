@@ -1,5 +1,25 @@
 # Implementation verification
 
+## Availability silence commands — 2026-09-22
+
+Added server-scoped `/silence` and `/unsilence` to the existing Gateway client, sharing the scheduler's SQLite state and delivery lock. Local verification used the existing temporary Python 3.14.7 environment with pinned discord.py 2.7.1 and Playwright 1.58.0.
+
+| Check | Result |
+| --- | --- |
+| `ruff check .` and `git diff --check` | Passed |
+| Complete `pytest -q` suite | 171 passed, including existing presence, scheduler, delivery, CLI, and rendered Chromium fixtures |
+| Command registration and access | Configured server resolved through mocked channel API; two parameterless commands registered only in that server; no additional role/member restrictions; DMs, threads, other channels, and other servers rejected privately |
+| Confirmations and errors | Public success and already-enabled responses disable mentions; silence includes localized date and relative-time timestamps; database, acknowledgement, response, and command-tree failures use sanitized local text |
+| Persistence and exact interval | 25 × 24-hour boundary, repeat invocation, save after lock wait, early resume, expired/already-enabled no-op, database reopen, destination change, schema version 1, and computed status fields covered |
+| Availability suppression | Initial availability, reopening, daily reminders, and pending retries suppressed; observations and episodes continue; operational notices/reminders and explicit setup sends remain deliverable |
+| Resume and delivery history | Fresh observation required after expiry or early resume; cancelled retries stay cancelled; sent events and reminder timestamps preserved; longer configured reminder window respected |
+| Concurrency and lifecycle | In-flight send completes before silence is saved; 0.2-second delivery-lock retries, 30-second timeout, cancellation, atomic rollback, bounded registration backoff, scheduler progress during registration, and shutdown cleanup covered |
+| Container rebuild and live Discord acceptance | Not performed; this turn was code-only at the user's request. Follow the runbook acceptance steps when deploying |
+
+No real Discord connections, notifications, or university requests were made. Interactions and Discord transports were mocked; all browser-fixture requests were intercepted. The first full-suite attempt hit agent-sandbox Chromium launch restrictions and an incomplete CLI PATH. With the test environment on PATH, the final complete suite passed outside the agent sandbox with Chromium's own sandbox enabled.
+
+Live acceptance remains separate: rebuild/restart, verify command installation scope and member permissions, invoke `/silence`, inspect its unmentioned confirmation and persisted status, verify restart persistence, then invoke `/unsilence` to restore normal operation. See [slash-command deployment acceptance](RUNBOOK.md#slash-command-deployment-acceptance). Mocked tests do not establish live command visibility or permissions. Silence follows the configured notification stream across destination changes; rolling back to an older image without this feature stops enforcing it.
+
 ## Online presence — 2026-09-22
 
 Added `discord.py==2.7.1` for a background Gateway connection during `parking-bot run`. Local verification used the same temporary Python 3.14.7 environment described below.

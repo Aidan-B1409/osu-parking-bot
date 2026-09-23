@@ -20,7 +20,7 @@ async def run(cfg, state, stop):
                 await asyncio.sleep(10)
 
         tasks = [asyncio.create_task(heartbeat()), asyncio.create_task(worker(discord, state, stop)),
-                 asyncio.create_task(maintain_presence(cfg))]
+                 asyncio.create_task(maintain_presence(cfg, state))]
         try:
             while not stop.is_set():
                 for task in tasks:

@@ -42,7 +42,10 @@ def test_cli_no_session_is_offline(cfg):
                            (['auth', 'status'], 0), (['auth', 'stop'], 0)]:
         result = subprocess.run(['parking-bot', *args], env=env, capture_output=True, text=True)
         assert result.returncode == expected, result.stderr
-    assert json.loads(subprocess.check_output(['parking-bot', 'status', '--json'], env=env))['auth_required']
+    status = json.loads(subprocess.check_output(['parking-bot', 'status', '--json'], env=env))
+    assert status['auth_required']
+    assert status['availability_silenced_until'] == 0
+    assert status['availability_silenced'] is False
 
 
 def test_notify_test_reports_safe_discord_error(cfg, monkeypatch, capsys):
